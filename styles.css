@@ -2,3 +2,25 @@
 .toolbar>label{display:block;margin-top:12px}.toolbar>select{width:100%;padding:12px;border:1px solid #b6c9c4;border-radius:9px;font:inherit}.provider{font-weight:700;color:#166053}.manual{margin:35px 0 110px;padding:25px;border-radius:14px;background:#ecf3f0}.manual h2{margin-top:0}.fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(225px,1fr));gap:14px;margin:20px 0}.fields label{display:flex;flex-direction:column;gap:6px}.fields input{width:100%;padding:11px;border:1px solid #a8bdb8;border-radius:8px;font:inherit}.remove{font-size:.8rem;margin-left:8px;padding:5px 9px}.dialog-content ol{padding-left:22px;line-height:1.6}.dialog-content label{display:block;margin-top:15px;font-weight:700}.dialog-content input{width:100%;padding:12px;margin-top:8px;font:inherit;border:1px solid #9eaea9;border-radius:9px}.notice[hidden]{display:none}
 
 .toolbar h2{font-size:1.2rem;margin:0 0 8px}.summary-entry{border-bottom:1px solid #d7e4df;padding:12px 0}.summary-entry ul{margin:8px 0}.summary-entry li{margin-bottom:5px}.summary-list{margin-bottom:12px}.manual{margin-bottom:24px}#reviewList h3{font-size:1rem;color:#12564b;margin:15px 0 4px}.dialog-content{max-height:80vh;overflow-y:auto}
+
+/* v3.1 · UX móvil y paleta institucional */
+:root{color:#3a3d31;background:#fff;--eucalipto:#008776;--roble:#404827;--borde:#e5e6dd}
+header{background:#fff;color:var(--roble);border-bottom:3px solid var(--eucalipto);padding:13px 0 15px}
+header p{line-height:1.35;margin:3px 0;color:#47574c}header h1{font-size:clamp(1.35rem,3vw,1.8rem);line-height:1.2;margin:2px 0 3px}
+.header-inner,.brand{display:flex;align-items:center;gap:18px}.brand-logo{width:190px;max-height:64px;object-fit:contain;object-position:left center;flex:none}
+.eyebrow{font-size:.66rem;color:var(--eucalipto);letter-spacing:.04em}
+main.wrap{padding-top:14px}.toolbar{border:1px solid var(--borde);padding:15px;margin-bottom:12px;border-radius:10px}
+.toolbar h2{color:var(--roble);font-size:1.06rem;margin:0 0 5px}.toolbar .muted{margin:6px 0}
+input,select{border-color:#bdc9c3;padding:10px;min-height:44px}button{background:var(--eucalipto);min-height:42px}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #92d3cb}
+.light{background:#ecf4f2;color:#005c51}.chosen{background:#d8f1ec;color:#005c51}
+.cards{grid-template-columns:repeat(auto-fill,minmax(255px,1fr));gap:9px}
+.book{border-color:var(--borde);padding:12px;gap:4px;min-height:0}.book h2{font-size:.95rem;line-height:1.3}.book p{font-size:.8rem;line-height:1.3}.book button{margin-top:7px;padding:7px 12px;min-height:38px}
+.provider,#reviewList h3{color:var(--eucalipto)}.manual{background:#f4f8f6;padding:18px;margin-top:20px}
+.bottom{border-color:var(--borde)}.bottom-inner{padding:8px 0}.pagination{margin:14px 0}
+@media(max-width:600px){body{padding-bottom:78px}.wrap{width:calc(100% - 24px)}header{padding:9px 0 10px}.brand{gap:8px}.brand-logo{width:112px;max-height:48px}.eyebrow{font-size:.6rem}header h1{font-size:1.18rem}header p{font-size:.76rem}.toolbar{padding:12px;margin-bottom:10px}.toolbar h2{font-size:.98rem}.fields{grid-template-columns:1fr;gap:9px;margin:10px 0}.cards{grid-template-columns:1fr;gap:7px}.book{padding:10px 12px;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;column-gap:10px}.book h2{grid-column:1;line-height:1.25}.book p{grid-column:1}.book button{grid-column:2;grid-row:1 / span 4;align-self:center;margin:0;white-space:nowrap;padding:7px 9px;font-size:.82rem;max-width:110px}.filters{margin-top:8px;gap:8px}.filters label{font-size:.8rem}.manual{padding:13px;margin-top:15px}.bottom-inner{gap:10px}.bottom-inner span{font-size:.8rem}.bottom-inner button{font-size:.87rem;padding:8px 10px}dialog{max-width:calc(100vw - 20px);max-height:90dvh}.dialog-content{max-height:84dvh;overflow-y:auto}}
+
+@media (max-width:600px){.book p.provider{display:none}.book p:nth-of-type(3){display:none}.book .meta{font-size:.75rem}.toolbar>label{font-size:.9rem}.manual .fields{margin:10px 0}.dialog-content{padding:10px}}
+
+/* Registro con documento: espacio táctil accesible y aviso de privacidad */
+.privacy{display:flex;align-items:flex-start;gap:10px;margin:12px 0;font-size:.91rem;line-height:1.45}.privacy input{flex:0 0 auto;width:19px;height:19px;margin-top:2px;accent-color:#008776}#documento{font-variant-numeric:tabular-nums}#documentoHelp{font-size:.87rem}
