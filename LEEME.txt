@@ -1,0 +1,6 @@
+FERIA DE LIBROS v3.5.0
+1. Ejecutar 01_migracion_v3_5_limite_5.sql en Supabase SQL Editor.
+2. En GitHub subir index.html y app.js solamente.
+3. No reemplazar config.js, libros.json, stands.json, styles.css ni logo-biblioteca.svg.
+4. La consulta de votos anteriores con un documento sin verificar identidad no se habilita por motivos de privacidad. La app mantiene el total de recomendaciones recibidas tras cada registro en la sesion actual y el servidor aplica el limite persistente.
+5. Probar con documentos FICTICIOS y no difundir la web hasta revisar controles antiautomatizacion y el aviso de privacidad.
