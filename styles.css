@@ -24,3 +24,8 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid 
 
 /* Registro con documento: espacio táctil accesible y aviso de privacidad */
 .privacy{display:flex;align-items:flex-start;gap:10px;margin:12px 0;font-size:.91rem;line-height:1.45}.privacy input{flex:0 0 auto;width:19px;height:19px;margin-top:2px;accent-color:#008776}#documento{font-variant-numeric:tabular-nums}#documentoHelp{font-size:.87rem}
+
+/* v3.3.1: mensaje de cierre y confirmación */
+.notice-final{background:#eff6f3;border-left:4px solid #008776;border-radius:8px;padding:12px 14px;color:#273c35;font-size:.94rem;line-height:1.45}
+#restart{margin-top:12px}
+@media (max-width:650px){.notice-final{font-size:.9rem;padding:10px 12px}}
