@@ -1,11 +1,28 @@
  'use strict';
 const $=id=>document.getElementById(id);
-const chosen=new Map(); let catalog=[],filtered=[],page=0,sending=false,completed=false; let savedByStand={}, savedTotal=0; const savedThisVisit=[]; const MAX_POR_STAND=5,pageSize=8,config=window.FERIA_CONFIG||{};
+let verifyStatus='idle',verifySeq=0,verifiedDocument='',verifyTimer=null; const chosen=new Map(); let catalog=[],filtered=[],page=0,sending=false,completed=false; let savedByStand={}, savedTotal=0; const savedThisVisit=[]; const MAX_POR_STAND=5,pageSize=8,config=window.FERIA_CONFIG||{};
 const configured=(()=>{try{return new URL(config.supabaseUrl).protocol==='https:' && !!config.supabaseAnonKey && !config.supabaseAnonKey.startsWith('PEGAR')}catch{return false}})();
 const norm=v=>String(v??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('es').trim();
 const value=v=>String(v??'').trim();
 function node(tag,cls,text){const a=document.createElement(tag);if(cls)a.className=cls;if(text!==undefined)a.textContent=text;return a}
 function option(select,value,label){const o=node('option','',label);o.value=value;select.append(o)}
+function canSelect(){return verifyStatus==='ready' && value($('documento').value)===verifiedDocument}
+function showVerify(msg){$('documentoEstado').textContent=msg}
+async function verifyDocument(){
+ const doc=value($('documento').value);const serial=++verifySeq;clearTimeout(verifyTimer);
+ if(!/^[0-9]{5,15}$/.test(doc)){verifyStatus='idle';verifiedDocument='';savedByStand={};savedTotal=0;showVerify('Ingresa tu documento (5 a 15 dígitos) para comprobar tus recomendaciones.');refresh();draw();return}
+ if(!configured){verifyStatus='error';showVerify('No pudimos verificar tus recomendaciones. Intenta más tarde.');refresh();draw();return}
+ verifyStatus='loading';showVerify('Comprobando tus recomendaciones...');refresh();draw();
+ try{
+ const res=await fetch(config.supabaseUrl.replace(/\/$/,'')+'/rest/v1/rpc/consultar_recomendaciones_documento',{method:'POST',headers:{apikey:config.supabaseAnonKey,...(config.supabaseAnonKey.startsWith('sb_publishable_')?{}:{Authorization:'Bearer '+config.supabaseAnonKey}),'Content-Type':'application/json'},body:JSON.stringify({p_evento:config.eventId,p_documento:doc})});
+ const raw=await res.text();let data;try{data=JSON.parse(raw)}catch{data={message:raw}}
+ if(!res.ok)throw Error(data.message||'No disponible');
+ if(serial!==verifySeq||doc!==value($('documento').value))return;
+ savedByStand=data.por_stand||{};savedTotal=data.total_votos||0;verifiedDocument=doc;verifyStatus='ready';
+ showVerify(savedTotal?`Consulta realizada. Tienes ${savedTotal} recomendaciones guardadas. Puedes seguir eligiendo en las editoriales disponibles.`:'Consulta realizada. Puedes comenzar a recomendar tus libros favoritos.');
+ }catch(e){if(serial!==verifySeq)return;verifyStatus='error';verifiedDocument='';savedByStand={};savedTotal=0;showVerify('No pudimos comprobar tus recomendaciones. Revisa tu conexión e intenta de nuevo.')}
+ refresh();draw();
+}
 function countFor(stand){return [...chosen.values()].filter(x=>x.proveedor===stand).length+(savedByStand[stand]||0)}
 function selectedStands(){return [...new Set([...chosen.values()].map(x=>x.proveedor))]}
 function checkProfile(){if(!$('perfil').value||!$('dependencia').value){$('setupNotice').hidden=false;$('setupNotice').textContent='Para continuar, selecciona tu perfil y facultad o dependencia.';window.scrollTo({top:0,behavior:'smooth'});return false}return true}
@@ -15,7 +32,8 @@ function refresh(){
  $('review').disabled=!chosen.size||completed;
  const active=$('proveedor').value;
  const total=active?countFor(active):0;
- $('standHint').textContent=active?`${total} de ${MAX_POR_STAND} recomendaciones en ${active}`:'Puedes recomendar hasta cinco libros por editorial o distribuidor.';
+ const ready=canSelect();
+ $('standHint').textContent=!ready?'Primero ingresa tu documento para verificar tus recomendaciones.':active?`${total} de ${MAX_POR_STAND} recomendaciones en ${active}`:'Puedes recomendar hasta cinco libros por editorial o distribuidor.';
  const banner=$('standComplete');
  banner.replaceChildren();banner.hidden=!active||total<MAX_POR_STAND;
  if(!banner.hidden){
@@ -41,7 +59,7 @@ function refresh(){
 }
 
 function filter(){const q=norm($('buscar').value),y=$('anio').value,stand=$('proveedor').value;filtered=catalog.filter(x=>(stand&&x.proveedor===stand)&&(!y||x.anio===y)&&(!q||norm(`${x.titulo} ${x.autor} ${x.anio} ${x.isbn}`).includes(q)));page=0;draw();refresh()}
-function draw(){const grid=$('books');grid.replaceChildren();if(!$('proveedor').value){$('counter').textContent='Selecciona un stand para explorar sus libros.';$('pageInfo').textContent='';$('prev').disabled=true;$('next').disabled=true;return;}for(const x of filtered.slice(page*pageSize,(page+1)*pageSize)){const card=node('article','book');card.append(node('h2','',x.titulo),node('p','',x.autor||'Autor no informado'),node('p','provider',x.proveedor),node('p','',`Editorial: ${x.editorial||'No informada'}`),node('p','meta',`${x.anio||'Año no informado'} · ISBN: ${x.isbn||'No informado'}`));const active=chosen.has(x.id),b=node('button',active?'chosen':'',active?'✓ Me interesa':'Me interesa este libro');b.type='button';b.disabled=completed||(!active&&countFor(x.proveedor)>=MAX_POR_STAND);if(!active&&countFor(x.proveedor)>=MAX_POR_STAND)b.textContent='5 recomendaciones completadas';b.onclick=()=>{if(!checkProfile())return;if(chosen.has(x.id))chosen.delete(x.id);else if(countFor(x.proveedor)<MAX_POR_STAND)chosen.set(x.id,{tipo:'catalogo',id:x.id,titulo:x.titulo,proveedor:x.proveedor});refresh();draw()};card.append(b);grid.append(card)}$('counter').textContent=`${filtered.length} títulos encontrados`;const total=Math.ceil(filtered.length/pageSize);$('pageInfo').textContent=total?`Página ${page+1} de ${total}`:'No hay resultados';$('prev').disabled=page===0;$('next').disabled=page>=total-1}
+function draw(){const grid=$('books');grid.replaceChildren();if(!$('proveedor').value){$('counter').textContent='Selecciona un stand para explorar sus libros.';$('pageInfo').textContent='';$('prev').disabled=true;$('next').disabled=true;return;}for(const x of filtered.slice(page*pageSize,(page+1)*pageSize)){const card=node('article','book');card.append(node('h2','',x.titulo),node('p','',x.autor||'Autor no informado'),node('p','provider',x.proveedor),node('p','',`Editorial: ${x.editorial||'No informada'}`),node('p','meta',`${x.anio||'Año no informado'} · ISBN: ${x.isbn||'No informado'}`));const active=chosen.has(x.id),b=node('button',active?'chosen':'',active?'✓ Me interesa':'Me interesa este libro');b.type='button';b.disabled=!canSelect()||completed||(!active&&countFor(x.proveedor)>=MAX_POR_STAND);if(!active&&countFor(x.proveedor)>=MAX_POR_STAND)b.textContent='5 recomendaciones completadas';if(!canSelect())b.textContent='Verifica tu documento para elegir';b.onclick=()=>{if(!canSelect()||!checkProfile())return;if(chosen.has(x.id))chosen.delete(x.id);else if(countFor(x.proveedor)<MAX_POR_STAND)chosen.set(x.id,{tipo:'catalogo',id:x.id,titulo:x.titulo,proveedor:x.proveedor});refresh();draw()};card.append(b);grid.append(card)}$('counter').textContent=`${filtered.length} títulos encontrados`;const total=Math.ceil(filtered.length/pageSize);$('pageInfo').textContent=total?`Página ${page+1} de ${total}`:'No hay resultados';$('prev').disabled=page===0;$('next').disabled=page>=total-1}
 $('proveedor').onchange=()=>{$('mProveedor').value=$('proveedor').value;filter()};$('buscar').oninput=filter;$('anio').onchange=filter;$('limpiar').onclick=()=>{$('buscar').value='';$('anio').value='';filter()};
 $('prev').onclick=()=>{if(page){page--;draw();$('buscar').scrollIntoView({behavior:'smooth',block:'start'})}};$('next').onclick=()=>{if((page+1)*pageSize<filtered.length){page++;draw();$('buscar').scrollIntoView({behavior:'smooth',block:'start'})}};
 let afterSaveNavigate=false;
@@ -56,6 +74,7 @@ $('manualForm').noValidate=true;
 $('manualForm').onsubmit=e=>{
  e.preventDefault();const msg=$('manualMsg');msg.textContent='';
  if(completed){msg.textContent='Hay una participación guardada; continúa agregando libros hasta llegar al límite por stand.';return}
+ if(!canSelect()){msg.textContent='Primero verifica tu documento de identidad al inicio de la página.';return}
  if(!checkProfile()){msg.textContent='Selecciona primero tu perfil y facultad o dependencia.';return}
  const stand=value($('mProveedor').value),titulo=value($('mTitulo').value),autor=value($('mAutor').value),anio=value($('mAnio').value),editorial=value($('mEditorial').value);
  if(!stand){msg.textContent='Selecciona el stand donde viste el libro.';$('mProveedor').focus();return}
@@ -71,6 +90,7 @@ $('manualForm').onsubmit=e=>{
  refresh();draw();
 };
 function openReview(){
+ if(!canSelect()){showVerify('Espera a que se comprueben tus recomendaciones antes de guardar.');$('documento').scrollIntoView({behavior:'smooth',block:'center'});return}
  if(!checkProfile())return;
  $('confirm').disabled=false;
  const doc=value($('documento').value);
@@ -93,11 +113,20 @@ function openReview(){
 $('review').onclick=()=>{afterSaveNavigate=false;openReview()};
 $('close').onclick=()=>{afterSaveNavigate=false;$('dialog').close()};
 
-$('documento').addEventListener('change',()=>{if(savedThisVisit.length||Object.keys(savedByStand).length){savedThisVisit.length=0;savedByStand={};savedTotal=0;chosen.clear();refresh();draw()}});
+$('documento').addEventListener('input',()=>{
+ ++verifySeq;clearTimeout(verifyTimer);verifyStatus='idle';verifiedDocument='';savedByStand={};savedTotal=0;
+ chosen.clear();savedThisVisit.length=0;
+ showVerify('Comprobación pendiente...');refresh();draw();
+ if(/^[0-9]{5,15}$/.test(value($('documento').value)))verifyTimer=setTimeout(verifyDocument,550);
+});
+$('documento').addEventListener('blur',()=>{if(/^[0-9]{5,15}$/.test(value($('documento').value))&&!canSelect())verifyDocument()});
+$('reintentarConsulta').onclick=verifyDocument;
 for(const id of ['perfil','dependencia']){$(id).addEventListener('change',()=>{sessionStorage.setItem('feria'+(id==='perfil'?'Perfil':'Dependencia'),$(id).value)})}
-$('confirm').onclick=async()=>{if(sending||completed||!checkProfile())return;const documento=value($('documento').value);if(!/^[0-9]{5,15}$/.test(documento)){$('confirmation').textContent='Escribe un número de documento válido de 5 a 15 dígitos, sin puntos ni espacios.';return}if(!$('consentimiento').checked){$('confirmation').textContent='Debes aceptar el uso del documento para el control de participación.';return}if(!configured){$('confirmation').textContent='La conexión a Supabase todavía no está configurada.';return}const selections=[...chosen.values()].map(x=>x.tipo==='catalogo'?{tipo:'catalogo',id:x.id}:{tipo:'manual',titulo:x.titulo,autor:x.autor,anio:x.anio,editorial:x.editorial,proveedor:x.proveedor});if(!selections.length)return;sending=true;$('confirm').disabled=true;$('confirmation').textContent='Guardando tus recomendaciones...';try{const res=await fetch(config.supabaseUrl.replace(/\/$/,'')+'/rest/v1/rpc/registrar_voto_documento',{method:'POST',headers:{apikey:config.supabaseAnonKey,...(config.supabaseAnonKey.startsWith('sb_publishable_')?{}:{Authorization:'Bearer '+config.supabaseAnonKey}),'Content-Type':'application/json'},body:JSON.stringify({p_evento:config.eventId,p_documento:documento,p_perfil:$('perfil').value,p_dependencia:$('dependencia').value,p_elecciones:selections})});const raw=await res.text();let result;try{result=JSON.parse(raw)}catch{result={message:raw}}if(!res.ok)throw Error(result.message||'El servidor no pudo registrar los votos');savedByStand=result.por_stand||savedByStand;savedTotal=result.total_votos||savedTotal;savedThisVisit.push(...[...chosen.values()].map(x=>({...x}))); $('confirmation').textContent=`¡Gracias! Guardamos ${selections.length} recomendaciones nuevas. Llevas ${savedTotal} en total. Pulsa Volver para seguir descubriendo libros.`;$('confirm').textContent='Guardar mis recomendaciones';$('close').hidden=false;$('confirm').disabled=true;chosen.clear();refresh();draw();if(afterSaveNavigate){$('dialog').close();afterSaveNavigate=false;navigateStands();$('manualMsg').textContent='Tus recomendaciones se guardaron correctamente. ¡Sigue descubriendo otros libros!';}}catch(e){$('confirmation').textContent='No pudimos guardar estas recomendaciones: '+e.message;$('confirm').disabled=false}finally{sending=false}};
+$('confirm').onclick=async()=>{if(sending||completed||!canSelect()||!checkProfile())return;const documento=value($('documento').value);if(!/^[0-9]{5,15}$/.test(documento)){$('confirmation').textContent='Escribe un número de documento válido de 5 a 15 dígitos, sin puntos ni espacios.';return}if(!$('consentimiento').checked){$('confirmation').textContent='Debes aceptar el uso del documento para el control de participación.';return}if(!configured){$('confirmation').textContent='La conexión a Supabase todavía no está configurada.';return}const selections=[...chosen.values()].map(x=>x.tipo==='catalogo'?{tipo:'catalogo',id:x.id}:{tipo:'manual',titulo:x.titulo,autor:x.autor,anio:x.anio,editorial:x.editorial,proveedor:x.proveedor});if(!selections.length)return;sending=true;$('confirm').disabled=true;$('confirmation').textContent='Guardando tus recomendaciones...';try{const res=await fetch(config.supabaseUrl.replace(/\/$/,'')+'/rest/v1/rpc/registrar_voto_documento',{method:'POST',headers:{apikey:config.supabaseAnonKey,...(config.supabaseAnonKey.startsWith('sb_publishable_')?{}:{Authorization:'Bearer '+config.supabaseAnonKey}),'Content-Type':'application/json'},body:JSON.stringify({p_evento:config.eventId,p_documento:documento,p_perfil:$('perfil').value,p_dependencia:$('dependencia').value,p_elecciones:selections})});const raw=await res.text();let result;try{result=JSON.parse(raw)}catch{result={message:raw}}if(!res.ok)throw Error(result.message||'El servidor no pudo registrar los votos');savedByStand=result.por_stand||savedByStand;savedTotal=result.total_votos||savedTotal;savedThisVisit.push(...[...chosen.values()].map(x=>({...x}))); $('confirmation').textContent=`¡Gracias! Guardamos ${selections.length} recomendaciones nuevas. Llevas ${savedTotal} en total. Pulsa Volver para seguir descubriendo libros.`;$('confirm').textContent='Guardar mis recomendaciones';$('close').hidden=false;$('confirm').disabled=true;chosen.clear();refresh();draw();if(afterSaveNavigate){$('dialog').close();afterSaveNavigate=false;navigateStands();$('manualMsg').textContent='Tus recomendaciones se guardaron correctamente. ¡Sigue descubriendo otros libros!';}}catch(e){$('confirmation').textContent='No pudimos guardar estas recomendaciones: '+e.message;$('confirm').disabled=false}finally{sending=false}};
 if(!configured){$('setupNotice').hidden=false;$('setupNotice').textContent='El catálogo funciona, pero el registro real de votos está deshabilitado hasta configurar Supabase en config.js.';$('confirm').disabled=true}
 const standAliases={'alpha':'Alpha Editorial','diaz de santos':'Ediciones Díaz de Santos','ecoe':'Ecoe Ediciones','el bibliotecologo':'El Bibliotecólogo','panamericana':'Editorial Médica Panamericana','tirant':'Tirant lo Blanch','trillas':'Editorial Trillas'};
 const canonicalStand=s=>standAliases[norm(s)]||s;
 Promise.all([fetch('libros.json',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error('Error de catálogo');return r.json()}),fetch('stands.json').then(r=>r.json()),fetch('perfiles.json').then(r=>r.json())]).then(([books,stands,metadata])=>{catalog=books.map(x=>({...x,proveedor:canonicalStand(x.proveedor)}));const complete=[...new Set([...stands.map(canonicalStand),...catalog.map(x=>x.proveedor)])].filter(Boolean).sort((a,b)=>a.localeCompare(b,'es',{sensitivity:'base'}));complete.forEach(p=>{option($('proveedor'),p,p);option($('mProveedor'),p,p)});metadata.perfiles.forEach(x=>option($('perfil'),x,x));metadata.dependencias.forEach(x=>option($('dependencia'),x,x));$('perfil').value=sessionStorage.getItem('feriaPerfil')||'';$('dependencia').value=sessionStorage.getItem('feriaDependencia')||'';[...new Set(books.map(x=>x.anio).filter(Boolean))].sort().reverse().forEach(y=>option($('anio'),y,y));filter()}).catch(e=>{$('counter').textContent='No fue posible cargar el catálogo: '+e.message});
 
+
+showVerify('Ingresa tu documento (5 a 15 dígitos) para comprobar tus recomendaciones.');

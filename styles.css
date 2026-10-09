@@ -45,3 +45,5 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid 
 .saved-item{color:#244c44}
 .saved-mark{font-size:.8rem;color:#07715f;font-weight:700;white-space:nowrap}
 @media(max-width:600px){.stand-complete{padding:10px 12px}.saved-mark{display:inline-block}}
+
+#documentoEstado{font-weight:600;margin:10px 0 6px}#reintentarConsulta{padding:8px 12px;font-size:.88rem;margin-bottom:8px}
