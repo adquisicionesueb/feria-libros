@@ -77,11 +77,30 @@ function refresh(){
 // Selector de temáticas accesible, desplegable y filtrable (sin dependencias externas).
 let allTemas=[],temaOpen=false,temaActive=-1;
 function closeTemas(){temaOpen=false;temaActive=-1;$('tematicasOpciones').hidden=true;$('temaFiltro').setAttribute('aria-expanded','false');$('temaDesplegar').setAttribute('aria-expanded','false');}
+function filteredForFacets(exclude=''){
+ const stand=$('proveedor').value,q=norm($('buscar').value),year=exclude==='anio'?'':$('anio').value,
+  fmt=exclude==='formato'?'':$('formatoFiltro').value,theme=exclude==='tema'?'':norm($('temaFiltro').value);
+ return catalog.filter(x=>stand&&x.proveedor===stand&&(!year||String(x.anio)===year)&&
+  (!fmt||x.formato===fmt||x.formato==='Ambos')&&
+  (!theme||norm(x.tematica||'').includes(theme)||norm(x.subtematica||'').includes(theme))&&
+  (!q||norm(`${x.titulo} ${x.autor} ${x.anio} ${x.isbn}`).includes(q)));
+}
+function updateFacetOptions(){
+ // Cada opción depende del stand, la búsqueda y los DEMÁS filtros, pero no de sí misma.
+ const year=$('anio'),currentYear=year.value;
+ const validYears=[...new Set(filteredForFacets('anio').map(x=>String(x.anio||'')).filter(y=>/^\d{4}$/.test(y)&&+y>=1450&&+y<=2100))].sort((a,b)=>b.localeCompare(a));
+ year.replaceChildren();option(year,'','Todos los años');validYears.forEach(y=>option(year,y,y));
+ year.value=validYears.includes(currentYear)?currentYear:'';
+ const fmt=$('formatoFiltro'),currentFormat=fmt.value;
+ const available=new Set(filteredForFacets('formato').flatMap(x=>x.formato==='Ambos'?['Físico','Digital']:[x.formato]));
+ fmt.replaceChildren();option(fmt,'','Todos los formatos');
+ for(const f of ['Físico','Digital'])if(available.has(f))option(fmt,f,f);
+ fmt.value=available.has(currentFormat)?currentFormat:'';
+}
 function renderTemas(){
  const list=$('tematicasOpciones'),q=norm($('temaFiltro').value);
- const stand=$('proveedor').value;
- const applicable=stand?new Set(catalog.filter(x=>x.proveedor===stand).flatMap(x=>[value(x.tematica),value(x.subtematica)]).filter(Boolean)):null;
- const matches=allTemas.filter(x=>(!applicable||applicable.has(x))&&(!q||norm(x).includes(q)));
+ const applicable=new Set(filteredForFacets('tema').flatMap(x=>[value(x.tematica),value(x.subtematica)]).filter(Boolean));
+ const matches=[...applicable].sort((a,b)=>a.localeCompare(b,'es',{sensitivity:'base'})).filter(x=>!q||norm(x).includes(q));
  list.replaceChildren();temaActive=-1;
  if(!matches.length){const e=node('div','tema-empty','No hay temáticas coincidentes');list.append(e)}
  else for(const [i,t] of matches.entries()){
@@ -107,7 +126,11 @@ function setupTemas(){
  document.addEventListener('pointerdown',e=>{if(!$('temaCombo').contains(e.target))closeTemas()});
 }
 
-function filter(){const q=norm($('buscar').value),y=$('anio').value,stand=$('proveedor').value,fmt=$('formatoFiltro').value,tema=norm($('temaFiltro').value);filtered=catalog.filter(x=>(stand&&x.proveedor===stand)&&(!y||x.anio===y)&&(!fmt||x.formato===fmt||x.formato==='Ambos')&&(!tema||norm(x.tematica||'').includes(tema)||norm(x.subtematica||'').includes(tema))&&(!q||norm(`${x.titulo} ${x.autor} ${x.anio} ${x.isbn}`).includes(q)));page=0;draw();refresh()}
+function filter(){
+ updateFacetOptions();
+ filtered=filteredForFacets();page=0;draw();refresh();
+ if(temaOpen)renderTemas();
+}
 function draw(){const grid=$('books');grid.replaceChildren();if(!$('proveedor').value){$('counter').textContent='Selecciona un stand para explorar sus libros.';$('pageInfo').textContent='';$('prev').disabled=true;$('next').disabled=true;return;}for(const x of filtered.slice(page*pageSize,(page+1)*pageSize)){const card=node('article','book');card.append(node('h2','',x.titulo),node('p','',x.autor||'Autor no informado'),node('p','provider',x.proveedor),node('p','',`Editorial: ${x.editorial||'No informada'}`),node('p','meta',`${x.anio||'Año no informado'} · ISBN: ${x.isbn||'No informado'}`));const active=chosen.has(x.id),b=node('button',active?'chosen':'',active?'✓ Me interesa':'Me interesa este libro');b.type='button';b.disabled=!canSelect()||completed||(!active&&!canAddCatalog(x.proveedor));if(!active&&!canAddCatalog(x.proveedor))b.textContent='Cupo de este stand completado';if(!canSelect())b.textContent='Verifica tu documento para elegir';b.onclick=async()=>{
  if(!canSelect()||!checkProfile())return;
  if(chosen.has(x.id)){chosen.delete(x.id);refresh();draw();return}
@@ -125,7 +148,7 @@ function draw(){const grid=$('books');grid.replaceChildren();if(!$('proveedor').
  chosen.set(x.id,{tipo:'catalogo',id:x.id,titulo:x.titulo,proveedor:x.proveedor,formato_preferido,interes_fisico_adicional});
  refresh();draw();
  };card.append(b); if(x.formato==='Ambos')card.append(node('p','meta','Disponible en físico y digital'));else if(x.formato==='Digital')card.append(node('p','meta','Formato digital'));else if(x.formato==='Físico')card.append(node('p','meta','Formato físico'));grid.append(card)}$('counter').textContent=`${filtered.length} títulos encontrados`;const total=Math.ceil(filtered.length/pageSize);$('pageInfo').textContent=total?`Página ${page+1} de ${total}`:'No hay resultados';$('prev').disabled=page===0;$('next').disabled=page>=total-1}
-$('proveedor').onchange=()=>{$('mProveedor').value=$('proveedor').value;closeTemas();filter()};$('buscar').oninput=filter;$('anio').onchange=filter;$('formatoFiltro').onchange=filter;setupTemas();$('limpiar').onclick=()=>{$('buscar').value='';$('anio').value='';$('formatoFiltro').value='';$('temaFiltro').value='';closeTemas();filter()};
+$('proveedor').onchange=()=>{$('mProveedor').value=$('proveedor').value;$('anio').value='';$('formatoFiltro').value='';$('temaFiltro').value='';$('buscar').value='';closeTemas();filter()};$('buscar').oninput=filter;$('anio').onchange=filter;$('formatoFiltro').onchange=filter;setupTemas();$('limpiar').onclick=()=>{$('buscar').value='';$('anio').value='';$('formatoFiltro').value='';$('temaFiltro').value='';closeTemas();filter()};
 $('prev').onclick=()=>{if(page){page--;draw();$('buscar').scrollIntoView({behavior:'smooth',block:'start'})}};$('next').onclick=()=>{if((page+1)*pageSize<filtered.length){page++;draw();$('buscar').scrollIntoView({behavior:'smooth',block:'start'})}};
 let afterSaveNavigate=false;
 function navigateStands(){ $('proveedor').value='';$('buscar').value='';filter();$('proveedor').focus();$('proveedor').scrollIntoView({behavior:'smooth',block:'center'}); }
@@ -191,7 +214,7 @@ $('confirm').onclick=async()=>{if(sending||completed||!canSelect()||!checkProfil
 if(!configured){$('setupNotice').hidden=false;$('setupNotice').textContent='El catálogo funciona, pero el registro real de votos está deshabilitado hasta configurar Supabase en config.js.';$('confirm').disabled=true}
 const standAliases={'alpha':'Alpha Editorial','diaz de santos':'Ediciones Díaz de Santos','ecoe':'Ecoe Ediciones','el bibliotecologo':'El Bibliotecólogo','panamericana':'Editorial Médica Panamericana','tirant':'Tirant lo Blanch','trillas':'Editorial Trillas','cobag':'Cobag Libros'};
 const canonicalStand=s=>standAliases[norm(s)]||s;
-Promise.all([fetch('libros.json',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error('Error de catálogo');return r.json()}),fetch('stands.json').then(r=>r.json()),fetch('perfiles.json').then(r=>r.json())]).then(([books,stands,metadata])=>{catalog=books.map(x=>({...x,proveedor:canonicalStand(x.proveedor)}));const complete=[...new Set([...stands.map(canonicalStand),...catalog.map(x=>x.proveedor)])].filter(Boolean).sort((a,b)=>a.localeCompare(b,'es',{sensitivity:'base'}));complete.forEach(p=>{option($('proveedor'),p,p);option($('mProveedor'),p,p)});metadata.perfiles.forEach(x=>option($('perfil'),x,x));metadata.dependencias.forEach(x=>option($('dependencia'),x,x));$('perfil').value=sessionStorage.getItem('feriaPerfil')||'';$('dependencia').value=sessionStorage.getItem('feriaDependencia')||'';[...new Set(books.map(x=>x.anio).filter(y=>/^\d{4}$/.test(String(y)) && Number(y)>=1450 && Number(y)<=2100))].sort().reverse().forEach(y=>option($('anio'),y,y));allTemas=[...new Set(books.flatMap(x=>[x.tematica,x.subtematica]).map(value).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es',{sensitivity:'base'}));filter()}).catch(e=>{$('counter').textContent='No fue posible cargar el catálogo: '+e.message});
+Promise.all([fetch('libros.json',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error('Error de catálogo');return r.json()}),fetch('stands.json').then(r=>r.json()),fetch('perfiles.json').then(r=>r.json())]).then(([books,stands,metadata])=>{catalog=books.map(x=>({...x,proveedor:canonicalStand(x.proveedor)}));const complete=[...new Set([...stands.map(canonicalStand),...catalog.map(x=>x.proveedor)])].filter(Boolean).sort((a,b)=>a.localeCompare(b,'es',{sensitivity:'base'}));complete.forEach(p=>{option($('proveedor'),p,p);option($('mProveedor'),p,p)});metadata.perfiles.forEach(x=>option($('perfil'),x,x));metadata.dependencias.forEach(x=>option($('dependencia'),x,x));$('perfil').value=sessionStorage.getItem('feriaPerfil')||'';$('dependencia').value=sessionStorage.getItem('feriaDependencia')||'';allTemas=[...new Set(books.flatMap(x=>[x.tematica,x.subtematica]).map(value).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es',{sensitivity:'base'}));filter()}).catch(e=>{$('counter').textContent='No fue posible cargar el catálogo: '+e.message});
 
 
 showVerify('Ingresa tu documento (5 a 15 dígitos) para comprobar tus recomendaciones.');
