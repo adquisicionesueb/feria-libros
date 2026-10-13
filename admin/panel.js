@@ -34,7 +34,7 @@
  }
  async function refresh(){
   el('status').textContent='Consultando resultados…';
-  try{render(await request('/rest/v1/rpc/panel_feria_resumen',{method:'POST',body:JSON.stringify({p_evento:'feria-2026'})}));el('status').textContent='Información actualizada.';await refreshAnalytics()}
+  try{render(await request('/rest/v1/rpc/panel_feria_resumen',{method:'POST',body:JSON.stringify({p_evento:'feria-2026'})}));el('status').textContent='Información actualizada.';await refreshAnalytics();await loadPeople();await loadManageForms();await loadLottery()}
   catch(e){el('status').textContent='No se pudieron consultar los datos: '+e.message}
  }
  function showLogged(){el('loginBox').hidden=true;el('dashboard').hidden=false;el('userLabel').textContent=session.user?.email||'';refresh()}
@@ -156,7 +156,7 @@
   }catch(e){el('preview').textContent='No se pudo leer el archivo: '+e.message}
  });
  el('upload').addEventListener('click',async()=>{
-  const rows=imported.filter(r=>!el('excludeTests').checked||!/\bprueba\b/i.test(r.comentario));
+  const rows=imported;
   if(!rows.length){el('uploadStatus').textContent='No hay respuestas para importar.';return}
   el('upload').disabled=true;el('uploadStatus').textContent=`Importando ${rows.length} respuestas…`;
   try{
@@ -164,7 +164,7 @@
     await request('/rest/v1/rpc/panel_feria_importar_forms',{method:'POST',body:JSON.stringify({p_filas:rows.slice(i,i+100)})});
     el('uploadStatus').textContent=`Procesadas ${Math.min(i+100,rows.length)} de ${rows.length} respuestas.`;
    }
-   el('uploadStatus').textContent+= ' Importación completada.';await refresh();
+   el('uploadStatus').textContent+= ' Importación completada.';await refresh();await loadManageForms();
   }catch(e){el('uploadStatus').textContent='Error de importación: '+e.message+'; revisa los resultados antes de reintentar.'}
   finally{el('upload').disabled=false}
  });
@@ -228,12 +228,81 @@
    out.textContent=`Exportados ${all.length} registros. Archivo confidencial.`;
   }catch(e){out.textContent='No se pudo exportar: '+e.message}finally{b.disabled=false}
  }));
- el('removeTests').addEventListener('click',async()=>{
-  if(!confirm('¿Eliminar de Supabase las respuestas excluidas cuyos comentarios contienen la palabra prueba? No modifica el Excel de OneDrive.'))return;
-  if(prompt('Escribe ELIMINAR para confirmar')!=='ELIMINAR')return;
-  try{const r=await request('/rest/v1/rpc/panel_feria_eliminar_pruebas',{method:'POST',body:JSON.stringify({p_confirmar:'ELIMINAR_PRUEBAS_FORMS'})});
-   el('removeStatus').textContent=`Eliminadas ${r.eliminadas} respuestas de prueba de Supabase. El archivo de Forms no se modificó.`;await refresh();}
-  catch(e){el('removeStatus').textContent='No se pudieron eliminar: '+e.message}
+ // Consolidado paginado, independiente del top de clasificaciones.
+ async function getPagedRpc(name){const all=[];for(let offset=0;;offset+=500){
+  const batch=await request('/rest/v1/rpc/'+name,{method:'POST',body:JSON.stringify({p_desde:offset,p_cantidad:500})});
+  all.push(...arr(batch));if(batch.length<500)break;if(all.length>300000)throw Error('Demasiados registros para exportar en navegador');
+ }return all}
+ let participantsFull=[];
+ async function loadPeople(){
+  try{participantsFull=await getPagedRpc('panel_feria_asistentes');
+   el('kUnique').textContent=n(participantsFull.length);
+   table('peopleRows',participantsFull.slice(0,100),[r=>r.documento,r=>r.perfil,r=>r.dependencia,r=>r.libros,r=>r.evaluaciones,r=>r.interacciones]);
+   el('peopleStatus').textContent=`${participantsFull.length} participantes únicos identificados. Se muestran hasta 100; CSV incluye todos.`;
+  }catch(e){el('peopleStatus').textContent='Error: '+e.message}
+ }
+ el('downloadPeople').addEventListener('click',()=>{try{csvFull('feria_asistentes_unicos.csv',participantsFull)}catch(e){alert(e.message)}});
+ async function loadManageForms(){
+  try{
+   const rows=await getPagedRpc('panel_feria_detalle_forms');
+   el('formsManageStatus').textContent=`${rows.length} respuestas de Forms, incluidas las excluidas. Se muestran hasta 150.`;
+   const tbody=el('manageFormsRows');tbody.innerHTML='';
+   for(const r of rows.slice(0,150)){
+    const tr=document.createElement('tr');
+    for(const value of [r.respuesta_id,r.numero_documento||'Sin documento',r.stand,r.recurso,r.excluida?'Excluida':'Activa']){
+     const td=document.createElement('td');td.textContent=String(value??'');tr.append(td);
+    }
+    const td=document.createElement('td'),btn=document.createElement('button');btn.className='secondary';
+    btn.textContent=r.excluida?'Restaurar':'Papelera / excluir';
+    btn.addEventListener('click',async()=>{
+     const exclude=!r.excluida;
+     const motivo=exclude?prompt('Motivo de la exclusión (ej.: prueba, identificación inconsistente):','Revisión administrativa'):'';
+     if(exclude&&motivo===null)return;
+     if(!confirm(`${exclude?'Excluir':'Restaurar'} respuesta ${r.respuesta_id}?`))return;
+     btn.disabled=true;
+     try{await request('/rest/v1/rpc/panel_feria_control_respuesta',{method:'POST',body:JSON.stringify({p_id:r.respuesta_id,p_excluir:exclude,p_motivo:motivo})});await refresh()}
+     catch(e){alert('No se pudo actualizar: '+e.message);btn.disabled=false}
+    });td.append(btn);tr.append(td);tbody.append(tr);
+   }
+  }catch(e){el('formsManageStatus').textContent='Error: '+e.message}
+ }
+ el('reloadForms').addEventListener('click',loadManageForms);
+ let lotteryBusy=false;
+ async function loadLottery(){try{
+  const data=await request('/rest/v1/rpc/panel_feria_sorteo_estado',{method:'POST',body:'{}'});
+  table('winnersRows',arr(data.ganadores),[r=>r.sorteado_en,r=>r.ronda,r=>r.orden,r=>r.documento]);
+  table('exclusionsRows',arr(data.exclusiones),[r=>r.documento||'(no recuperable)',r=>r.motivo]);
+ }catch(e){el('lotteryStatus').textContent='Error: '+e.message}}
+ const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+ el('draw').addEventListener('click',async()=>{
+  if(lotteryBusy)return;
+  const count=Number(el('winnerCount').value);
+  if(!Number.isInteger(count)||count<1||count>20){alert('Elige entre 1 y 20 ganadores');return}
+  if(!confirm(`¿Realizar sorteo de ${count} ganador(es) y registrar el resultado definitivo?`))return;
+  lotteryBusy=true;el('draw').disabled=true;el('lotteryStatus').textContent='Generando resultados aleatorios en la base de datos…';
+  try{
+   // Primero se registra la selección segura en el servidor. La animación no decide quién gana.
+   const result=await request('/rest/v1/rpc/panel_feria_sortear',{method:'POST',body:JSON.stringify({p_cantidad:count})});
+   el('lotteryStatus').textContent='Resultado registrado. Mostrando balotera…';
+   el('lotteryAnimation').classList.add('rolling');
+   await pause(2800);
+   el('lotteryAnimation').classList.remove('rolling');
+   const docs=arr(result.ganadores).map(x=>x.documento);
+   el('lotteryAnimation').querySelector('.lotteryBall').textContent='★';
+   el('lotteryAnimation').querySelector('span').textContent=docs.join(' · ');
+   el('lotteryStatus').textContent=`Ronda ${result.ronda}. Ganadores: ${docs.join(', ')}. Elegibles antes: ${result.candidatos_antes}.`;
+   await loadLottery();await loadPeople();
+  }catch(e){el('lotteryAnimation').classList.remove('rolling');el('lotteryStatus').textContent='No se realizó el sorteo: '+e.message}
+  finally{lotteryBusy=false;el('draw').disabled=false}
  });
-
+ async function exclusionAction(excluir){
+  const documento=el('excludeDoc').value.trim(),motivo=el('excludeReason').value.trim();
+  if(!/^\d{5,15}$/.test(documento)){alert('Documento inválido');return}
+  if(!confirm(`${excluir?'Excluir':'Rehabilitar'} documento ${documento} del sorteo?`))return;
+  try{await request('/rest/v1/rpc/panel_feria_sorteo_excluir',{method:'POST',body:JSON.stringify({p_documento:documento,p_excluir:excluir,p_motivo:motivo})});
+   el('lotteryStatus').textContent='Exclusión actualizada.';await loadLottery();await loadPeople();
+  }catch(e){el('lotteryStatus').textContent='Error: '+e.message}
+ }
+ el('excludeDraw').addEventListener('click',()=>exclusionAction(true));
+ el('restoreDraw').addEventListener('click',()=>exclusionAction(false));
 })();
