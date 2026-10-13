@@ -50,3 +50,19 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid 
 
 #formatoDialog .actions {display:flex;flex-wrap:wrap;gap:0.65rem;margin:1rem 0;}
 #formatoDialog .actions button {flex:1 1 140px;}
+
+/* v3.7.0 filtros accesibles */
+.tema-filter{flex:2 1 260px}.tema-filter input{width:100%}#formatoFiltro{min-width:125px}#digitalExtraDialog .actions{display:flex;gap:10px;flex-wrap:wrap}#digitalExtraDialog .actions button{flex:1 1 100px}
+
+/* v3.7.1: selector searchable de temáticas */
+.tema-combobox{position:relative;min-width:min(100%,260px);font-size:.92rem;font-weight:600}
+.tema-combobox>label{display:block;margin-bottom:5px}
+.tema-combo-input{position:relative;display:flex}
+.tema-combo-input input{width:100%;padding-right:47px}
+.tema-arrow{position:absolute;right:3px;top:3px;bottom:3px;padding:0 13px;background:#e8f1ee;color:#14534b;border-radius:7px;font-size:1.2rem}
+.tema-options{position:absolute;top:100%;left:0;right:0;z-index:80;max-height:250px;overflow:auto;background:white;border:1px solid #a8bdb8;border-radius:9px;box-shadow:0 10px 25px #10282129;margin-top:4px}
+.tema-options[hidden]{display:none}
+.tema-option{display:block;width:100%;border:0;border-radius:0;padding:10px 12px;color:#243b38;background:white;text-align:left;font-size:.89rem;font-weight:450;white-space:normal}
+.tema-option:hover,.tema-option:focus,.tema-option.tema-active{background:#e7f4f0;color:#10483d;filter:none}
+.tema-empty{padding:12px;color:#607470;font-weight:400;font-size:.86rem}
+@media(max-width:600px){.tema-combobox{flex:1 1 100%;min-width:100%}.tema-options{max-height:210px}}
