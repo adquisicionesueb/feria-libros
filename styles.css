@@ -47,3 +47,6 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid 
 @media(max-width:600px){.stand-complete{padding:10px 12px}.saved-mark{display:inline-block}}
 
 #documentoEstado{font-weight:600;margin:10px 0 6px}#reintentarConsulta{padding:8px 12px;font-size:.88rem;margin-bottom:8px}
+
+#formatoDialog .actions {display:flex;flex-wrap:wrap;gap:0.65rem;margin:1rem 0;}
+#formatoDialog .actions button {flex:1 1 140px;}
