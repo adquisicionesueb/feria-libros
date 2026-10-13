@@ -66,3 +66,39 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid 
 .tema-option:hover,.tema-option:focus,.tema-option.tema-active{background:#e7f4f0;color:#10483d;filter:none}
 .tema-empty{padding:12px;color:#607470;font-weight:400;font-size:.86rem}
 @media(max-width:600px){.tema-combobox{flex:1 1 100%;min-width:100%}.tema-options{max-height:210px}}
+
+/* v3.7.3 - Filtros apilados en telefonos y pantallas angostas.
+   Mantiene el diseno horizontal de escritorio. */
+@media (max-width: 767px) {
+  .filters {
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 12px;
+    width: 100%;
+    min-width: 0;
+  }
+  .filters > label,
+  .filters > .tema-filter,
+  .filters > button {
+    display: block;
+    flex: none;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    margin: 0;
+  }
+  .filters select,
+  .filters input,
+  .filters .tema-combo-input,
+  .filters #limpiar {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+  .filters .tema-combobox { min-width: 0; }
+  .filters .tema-options { max-width: 100%; }
+}
