@@ -4,7 +4,7 @@
  const base=(cfg.supabaseUrl||'').replace(/\/rest\/v1\/?$/,'').replace(/\/$/,'');
  const key=cfg.supabaseAnonKey||'';
  const el=id=>document.getElementById(id);
- let session=null, dashboardData=null, imported=[];
+ let session=null, dashboardData=null, imported=[], analytics=null;
  const errorText=(obj,fallback)=>obj?.message||obj?.error_description||obj?.error||fallback;
  async function request(path,opts={}){
   if(!base||!key)throw Error('No se encontró la configuración pública de Supabase (../config.js).');
@@ -34,7 +34,7 @@
  }
  async function refresh(){
   el('status').textContent='Consultando resultados…';
-  try{render(await request('/rest/v1/rpc/panel_feria_resumen',{method:'POST',body:JSON.stringify({p_evento:'feria-2026'})}));el('status').textContent='Información actualizada.'}
+  try{render(await request('/rest/v1/rpc/panel_feria_resumen',{method:'POST',body:JSON.stringify({p_evento:'feria-2026'})}));el('status').textContent='Información actualizada.';await refreshAnalytics()}
   catch(e){el('status').textContent='No se pudieron consultar los datos: '+e.message}
  }
  function showLogged(){el('loginBox').hidden=true;el('dashboard').hidden=false;el('userLabel').textContent=session.user?.email||'';refresh()}
@@ -84,7 +84,8 @@
   if(m)return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}T${(m[4]||'00').padStart(2,'0')}:${m[5]||'00'}:${m[6]||'00'}-05:00`;
   return /^\d{4}-\d{2}-\d{2}/.test(s)?s:'';
  }
- const canonical=o=>({id:String(get(o,'id')??'').trim(),finalizacion:isoDate(get(o,'hora de finalización')),
+ const canonical=o=>({id:String(get(o,'id')??'').trim(),inicio:isoDate(get(o,'hora de inicio')),
+   correo:String(get(o,'correo electrónico')||''),nombre:String(get(o,'nombre')||''),finalizacion:isoDate(get(o,'hora de finalización')),
    documento:String(get(o,'número de documento')??'').replace(/\.0$/,'').trim(),perfil:String(get(o,'qué tipo de usuario')||''),
    dependencia:String(get(o,'dependencia, facultad')||''),stand:String(get(o,'qué stand visitaste')||''),
    recurso:String(get(o,'qué recurso o plataforma')||''),conocimiento:String(get(o,'ya conocías o utilizabas')||''),
@@ -167,4 +168,72 @@
   }catch(e){el('uploadStatus').textContent='Error de importación: '+e.message+'; revisa los resultados antes de reintentar.'}
   finally{el('upload').disabled=false}
  });
+
+ // Normalizacion de dependencias. Bioetica y Humanidades se cuentan como unidades academicas.
+ const normalize=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('es').trim();
+ function classify(dep){
+  const s=normalize(dep);
+  if(/bioetica|humanidades/.test(s))return 'Académica';
+  if(/facultad|programa de|escuela de|odontolog|medicina|enfermer|ingenier|psicolog|educacion|nutricion|arquitectura|ciencias economicas|creacion|arte|derecho|filosofia/.test(s))return 'Académica';
+  return 'Administrativa / investigación / otra';
+ }
+ const csvFull=(name,rows)=>{
+  if(!rows.length)throw Error('Sin registros para exportar');
+  const keys=[...new Set(rows.flatMap(x=>Object.keys(x)))];
+  const lines=[keys.map(csvEscape).join(';'),...rows.map(r=>keys.map(k=>csvEscape(r[k])).join(';'))];
+  const url=URL.createObjectURL(new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv;charset=utf-8'}));
+  const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);
+ };
+ function drawAnalytics(){
+  if(!analytics)return;
+  const all=arr(analytics.dependencias).map(x=>({...x,tipo:classify(x.dependencia)}));
+  const show=el('onlyAcademic').checked?all.filter(x=>x.tipo==='Académica'):all;
+  const total=all.reduce((a,x)=>a+Number(x.personas),0);
+  const max=Math.max(1,...show.map(x=>Number(x.personas)));
+  el('facultyChart').innerHTML=show.slice(0,16).map(x=>`<div class="barItem"><span>${esc(x.dependencia)}</span><div class="barTrack"><div class="barFill" style="width:${Math.max(1,100*Number(x.personas)/max)}%"></div></div><strong>${n(x.personas)}</strong></div>`).join('')||'<p class="muted">Aún no hay datos para estas categorías.</p>';
+  table('faculties',show,[r=>r.dependencia,r=>r.tipo,r=>r.personas,r=>total?(100*r.personas/total).toFixed(1)+' %':'0 %']);
+  const stand=el('hoursStand').value;
+  const measures=Array(24).fill(0);
+  arr(analytics.horas).filter(r=>!stand||r.stand===stand).forEach(r=>{if(r.hora>=0&&r.hora<24)measures[r.hora]+=Number(r.interacciones)});
+  const peak=Math.max(1,...measures);
+  el('hoursChart').innerHTML=measures.map((v,i)=>`<div class="hourItem" title="${i}:00 - ${v} interacciones"><div class="hourColumn" style="height:${v?Math.max(3,100*v/peak):1}%"></div><small>${i}</small></div>`).join('');
+ }
+ async function refreshAnalytics(){
+  try{
+   analytics=await request('/rest/v1/rpc/panel_feria_analitica',{method:'POST',body:'{}'});
+   const st=[...new Set(arr(analytics.horas).map(x=>x.stand).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
+   const current=el('hoursStand').value;
+   el('hoursStand').innerHTML='<option value="">Todos los stands</option>'+st.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
+   if(st.includes(current))el('hoursStand').value=current;
+   drawAnalytics();
+  }catch(e){el('facultyChart').textContent='No se pudo consultar la analítica: '+e.message}
+ }
+ el('onlyAcademic').addEventListener('change',drawAnalytics);
+ el('hoursStand').addEventListener('change',drawAnalytics);
+ el('exportDependencias').addEventListener('click',()=>{
+  try{if(!analytics)throw Error('Todavía no hay datos');csvFull('feria_distribucion_unidades.csv',arr(analytics.dependencias).map(x=>({...x,tipo:classify(x.dependencia)})))}catch(e){alert(e.message)}
+ });
+ document.querySelectorAll('.fullExport').forEach(b=>b.addEventListener('click',async()=>{
+  const kind=b.dataset.kind;const fn=kind==='libros'?'panel_feria_detalle_libros':'panel_feria_detalle_forms';
+  const out=el('exportStatus');out.textContent='Descargando registros detallados…';b.disabled=true;
+  try{
+   let all=[];
+   for(let offset=0;;offset+=500){
+    const part=await request('/rest/v1/rpc/'+fn,{method:'POST',body:JSON.stringify({p_desde:offset,p_cantidad:500})});
+    all.push(...arr(part));out.textContent=`Recibidos ${all.length} registros…`;
+    if(part.length<500)break;
+    if(all.length>300000)throw Error('Límite preventivo de exportación superado');
+   }
+   csvFull('feria_'+kind+'_detallado.csv',all);
+   out.textContent=`Exportados ${all.length} registros. Archivo confidencial.`;
+  }catch(e){out.textContent='No se pudo exportar: '+e.message}finally{b.disabled=false}
+ }));
+ el('removeTests').addEventListener('click',async()=>{
+  if(!confirm('¿Eliminar de Supabase las respuestas excluidas cuyos comentarios contienen la palabra prueba? No modifica el Excel de OneDrive.'))return;
+  if(prompt('Escribe ELIMINAR para confirmar')!=='ELIMINAR')return;
+  try{const r=await request('/rest/v1/rpc/panel_feria_eliminar_pruebas',{method:'POST',body:JSON.stringify({p_confirmar:'ELIMINAR_PRUEBAS_FORMS'})});
+   el('removeStatus').textContent=`Eliminadas ${r.eliminadas} respuestas de prueba de Supabase. El archivo de Forms no se modificó.`;await refresh();}
+  catch(e){el('removeStatus').textContent='No se pudieron eliminar: '+e.message}
+ });
+
 })();
