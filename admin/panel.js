@@ -23,18 +23,90 @@
  function table(id,rows,cols){
   el(id).innerHTML=rows.length?rows.map((r,i)=>`<tr>${cols.map(c=>`<td>${esc(c(r,i))}</td>`).join('')}</tr>`).join(''):'<tr><td colspan="8">Todavía no hay datos registrados.</td></tr>';
  }
+ // Solo presentación: no modifica registros ni requiere migraciones SQL.
+ // Agrupa por stand y título normalizado (incluye registros manuales).
+ const cleanTitle=value=>String(value??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+   .toLowerCase().replace(/&/g,' y ').replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
+ const cleanStand=value=>String(value??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+   .toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
+ const aliasTitles=new Map([
+  ['el bocevo en ingenieria y arquitectura','el boceto en ingenieria y arquitectura'],
+  ['el bocebo en ingenieria y arquitectura','el boceto en ingenieria y arquitectura'],
+  ['dsm 5','dsm5'],
+ ]);
+ const canonicalTitle=value=>{const t=cleanTitle(value);return aliasTitles.get(t)||t};
+ let voteCache=[], formsCache=[],catalogCache=new Map();
+ const aliases=new Map([
+ ['dsm 5','dsm5'],['dsm5','dsm5'],['el boceyo en ingenieria y arquitectura','el boceto en la ingenieria y arquitectura'],
+ ['el bocevo en ingenieria y arquitectura','el boceto en la ingenieria y arquitectura'],
+ ['palestina la prumavera improbable','palestina la primavera improbable'],['palestina la primavera improbable','palestina la primavera improbable'],
+ ['semiotica del consumo','semiotica del consumo una aproximacion a la publicidad desde sus signos']
+ ]);
+ function workKey(t){const k=cleanTitle(t);return aliases.get(k)||k}
+ function standKey(s){return cleanStand(s).replace(/^(editorial|ediciones) /,'')}
+ function getFormat(r){const f=cleanTitle(r.formato_preferido);if(f==='fisico')return 'fisico';if(f==='digital')return 'digital';return 'sin'}
+ async function loadCatalog(votes){
+  const ids=[...new Set(votes.map(x=>x.libro_id).filter(Boolean))];catalogCache=new Map();
+  for(let i=0;i<ids.length;i+=65){
+   const chunk=ids.slice(i,i+65);try{
+    const rows=await request('/rest/v1/feria_libros?select=id,titulo,autor,anio,isbn,editorial,proveedor,formato,tematica,subtematica&id=in.('+chunk.map(encodeURIComponent).join(',')+')');
+    for(const r of arr(rows))catalogCache.set(r.id,r);
+   }catch(e){console.warn('Metadatos no accesibles para algunos registros',e.message);break}
+  }
+ }
+ function groupedBooks(votes){
+  const groups=new Map();
+  for(const r of votes){
+   const metadata=catalogCache.get(r.libro_id)||{};
+   const key=workKey(r.titulo);if(!key)continue;
+   if(!groups.has(key))groups.set(key,{titulo:metadata.titulo||r.titulo,votos:0,fisico:0,digital:0,sin_formato:0,stands:new Set(),ids:new Set(),isbns:new Set(),autores:new Set(),editoriales:new Set(),anios:new Set(),tematicas:new Set(),subtematicas:new Set(),variantes:new Set()});
+   const g=groups.get(key);g.votos++;g[getFormat(r)==='sin'?'sin_formato':getFormat(r)]++;
+   if(r.proveedor)g.stands.add(r.proveedor);if(r.libro_id)g.ids.add(r.libro_id);
+   if(metadata.isbn)g.isbns.add(String(metadata.isbn));if(metadata.tematica)g.tematicas.add(metadata.tematica);
+   if(metadata.subtematica)g.subtematicas.add(metadata.subtematica);
+   if(metadata.autor||r.autor)g.autores.add(metadata.autor||r.autor);
+   if(metadata.editorial||r.editorial)g.editoriales.add(metadata.editorial||r.editorial);
+   if(metadata.anio||r.anio)g.anios.add(metadata.anio||r.anio);
+   g.variantes.add(r.titulo);
+   if(metadata.titulo&&metadata.titulo.length>g.titulo.length)g.titulo=metadata.titulo;
+  }
+  const join=x=>[...x].join(' | ');
+  return [...groups.values()].map(g=>({titulo:g.titulo,votos:g.votos,fisico:g.fisico,digital:g.digital,sin_formato:g.sin_formato,
+   proveedor:join(g.stands),stands:join(g.stands),isbn:join(g.isbns),autor:join(g.autores),editorial:join(g.editoriales),anio:join(g.anios),tematica:join(g.tematicas),subtematica:join(g.subtematicas),libro_id:join(g.ids),variantes:join(g.variantes),revision:g.isbns.size>1?'Validar ISBN/ediciones':g.sin_formato?'Validar formato manual':'OK'})).sort((a,b)=>b.votos-a.votos||a.titulo.localeCompare(b.titulo,'es'));
+ }
+ function groupedStands(votes,forms){
+  const groups=new Map();const get=s=>{const k=cleanStand(s).replace(/^editorial /,'');if(!groups.has(k))groups.set(k,{stand:s,recomendaciones:0,encuestas:0,favorables:0,participants:new Set(),recursos:new Map()});return groups.get(k)};
+  for(const r of votes){const g=get(r.proveedor);g.recomendaciones++;if(r.documento)g.participants.add(r.documento)}
+  for(const r of forms.filter(f=>!f.excluida)){const g=get(r.stand);g.encuestas++;const fav=/^(si|sí)$/i.test(String(r.interes||'').trim());if(fav)g.favorables++;
+   const note=String(r.recurso||'').trim();if(note)g.recursos.set(note,(g.recursos.get(note)||0)+1)}
+  return [...groups.values()].map(g=>({stand:g.stand,tipo:g.recomendaciones&&g.encuestas?'Ambos':g.recomendaciones?'Proveedor de libros (físicos o digitales)':'Proveedor de medios educativos digitales',
+   recomendaciones:g.recomendaciones,encuestas:g.encuestas,favorables:g.favorables,favorabilidad:g.encuestas?(100*g.favorables/g.encuestas).toFixed(1)+' %':'No aplica',
+   recursos:[...g.recursos].sort((a,b)=>b[1]-a[1]).map(x=>x[0]).join(' | '),participantes:g.participants.size})).sort((a,b)=>(b.recomendaciones+b.encuestas)-(a.recomendaciones+a.encuestas));
+ }
+ async function refreshBooksGrouped(){
+  voteCache=await getPagedRpc('panel_feria_detalle_libros');await loadCatalog(voteCache);
+  formsCache=await getPagedRpc('panel_feria_detalle_forms');
+  if(!dashboardData)return;
+  dashboardData.libros=groupedBooks(voteCache);
+  dashboardData.stands_libros=groupedStands(voteCache,formsCache);
+  dashboardData.recursos_digitales=dashboardData.stands_libros.filter(x=>x.encuestas);
+  table('books',dashboardData.libros,[(r,i)=>i+1,r=>r.titulo,r=>r.stands,r=>r.votos,r=>r.fisico,r=>r.digital,r=>r.sin_formato]);
+  table('stands',dashboardData.stands_libros,[r=>r.stand,r=>r.tipo,r=>r.recomendaciones,r=>r.encuestas,r=>r.favorabilidad]);
+  table('resources',dashboardData.recursos_digitales,[r=>r.stand,r=>r.encuestas,r=>r.recursos]);
+  el('booksInfo').textContent=`${dashboardData.libros.length} obras agrupadas sin discriminar stand; ${voteCache.length} recomendaciones. El formato no declarado queda sin determinar. Diferentes ISBN para una misma obra requieren revisión.`;
+ }
  function render(d){
   dashboardData=d;
   el('kVotes').textContent=n(d.total_votos);el('kPeople').textContent=n(d.participantes_libros);el('kForms').textContent=n(d.evaluaciones_digitales);
-  table('books',arr(d.libros),[(r,i)=>i+1,r=>r.titulo,r=>r.proveedor,r=>r.votos,r=>r.fisico,r=>r.digital]);
-  table('stands',arr(d.stands_libros),[r=>r.stand,r=>r.votos,r=>r.participantes]);
-  table('participants',arr(d.participantes),[r=>r.documento||'(sin documento)',r=>r.perfil,r=>r.dependencia,r=>r.votos_libros,r=>r.evaluaciones_digitales,r=>r.stands_libros,r=>r.stands_digitales,r=>r.interacciones]);
-  table('digital',arr(d.stands_digitales),[r=>r.stand,r=>r.evaluaciones,r=>r.favorables,r=>r.evaluaciones?((100*r.favorables/r.evaluaciones).toFixed(1)+' %'):'—']);
-  table('resources',arr(d.recursos_digitales),[r=>r.stand,r=>r.recurso,r=>r.evaluaciones,r=>r.favorables]);
+  table('books',arr(d.libros),[(r,i)=>i+1,r=>r.titulo,r=>r.proveedor,r=>r.votos,r=>r.fisico,r=>r.digital,r=>0]);
+  table('stands',arr(d.stands_libros),[r=>r.stand,r=>'Proveedor de libros',r=>r.votos,r=>0,r=>'No aplica']);
+  table('participants',arr(d.participantes),[r=>r.documento||'(sin documento)',r=>r.perfil,r=>r.dependencia,r=>Number(r.stands_libros||0)+Number(r.stands_digitales||0),r=>r.interacciones,r=>r.votos_libros]);
+  
+  table('resources',arr(d.recursos_digitales),[r=>r.stand,r=>r.evaluaciones,r=>r.recurso]);
  }
  async function refresh(){
   el('status').textContent='Consultando resultados…';
-  try{render(await request('/rest/v1/rpc/panel_feria_resumen',{method:'POST',body:JSON.stringify({p_evento:'feria-2026'})}));el('status').textContent='Información actualizada.';await refreshAnalytics();await loadPeople();await loadManageForms();await loadLottery()}
+  try{render(await request('/rest/v1/rpc/panel_feria_resumen',{method:'POST',body:JSON.stringify({p_evento:'feria-2026'})}));el('status').textContent='Información actualizada.';try{await refreshBooksGrouped()}catch(err){el('booksInfo').textContent='No se pudo consolidar el ranking: '+err.message+'; se muestra el ranking original.'}await refreshAnalytics();await loadPeople();await loadManageForms();await loadLottery()}
   catch(e){el('status').textContent='No se pudieron consultar los datos: '+e.message}
  }
  function showLogged(){el('loginBox').hidden=true;el('dashboard').hidden=false;el('userLabel').textContent=session.user?.email||'';refresh()}
@@ -50,18 +122,15 @@
  el('refresh').addEventListener('click',refresh);
  function csvEscape(x){const s=String(x??'');return /[",\r\n;]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s}
  const columns={
-  libros:['libro_id','titulo','autor','proveedor','votos','fisico','digital'],
-  stands_libros:['stand','votos','participantes'],
-  participantes:['documento','perfil','dependencia','votos_libros','evaluaciones_digitales','stands_libros','stands_digitales','interacciones'],
-  stands_digitales:['stand','evaluaciones','favorables'],
-  recursos_digitales:['stand','recurso','evaluaciones','favorables']
+  libros:['titulo','votos','fisico','digital','sin_formato','stands','isbn','autor','anio','editorial','tematica','subtematica','libro_id','variantes','revision'],
+  stands_libros:['stand','tipo','recomendaciones','encuestas','favorables','favorabilidad','recursos'],
+  participantes:['documento','perfil','dependencia','stands_libros','stands_digitales','interacciones','votos_libros'],
+  recursos_digitales:['stand','encuestas','recursos']
  };
+ function exportXlsx(name,rows){if(!rows.length)throw Error('No hay registros');if(!window.FeriaExcel)throw Error('Falta el archivo excel.js');window.FeriaExcel.save(name,rows)}
  document.querySelectorAll('.export').forEach(b=>b.addEventListener('click',()=>{
-  if(!dashboardData)return;
-  const kind=b.dataset.kind,keys=columns[kind];
-  const rows=[keys.join(';'),...arr(dashboardData[kind]).map(r=>keys.map(k=>csvEscape(r[k])).join(';'))];
-  const blob=new Blob(['\ufeff'+rows.join('\r\n')],{type:'text/csv;charset=utf-8'});
-  const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='feria_'+kind+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),500);
+  if(!dashboardData)return;const kind=b.dataset.kind;
+  try{exportXlsx('feria_'+kind+'.xlsx',arr(dashboardData[kind]).map(r=>Object.fromEntries(columns[kind].map(k=>[k,r[k]]))))}catch(e){alert(e.message)}
  }));
  function parseCsv(text){
   const rows=[];let row=[],field='',quotes=false;
@@ -177,13 +246,7 @@
   if(/facultad|programa de|escuela de|odontolog|medicina|enfermer|ingenier|psicolog|educacion|nutricion|arquitectura|ciencias economicas|creacion|arte|derecho|filosofia/.test(s))return 'Académica';
   return 'Administrativa / investigación / otra';
  }
- const csvFull=(name,rows)=>{
-  if(!rows.length)throw Error('Sin registros para exportar');
-  const keys=[...new Set(rows.flatMap(x=>Object.keys(x)))];
-  const lines=[keys.map(csvEscape).join(';'),...rows.map(r=>keys.map(k=>csvEscape(r[k])).join(';'))];
-  const url=URL.createObjectURL(new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv;charset=utf-8'}));
-  const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);
- };
+ const csvFull=(name,rows)=>exportXlsx(name.replace(/\.csv$/i,'.xlsx'),rows);
  function drawAnalytics(){
   if(!analytics)return;
   const all=arr(analytics.dependencias).map(x=>({...x,tipo:classify(x.dependencia)}));
@@ -196,7 +259,7 @@
   const measures=Array(24).fill(0);
   arr(analytics.horas).filter(r=>!stand||r.stand===stand).forEach(r=>{if(r.hora>=0&&r.hora<24)measures[r.hora]+=Number(r.interacciones)});
   const peak=Math.max(1,...measures);
-  el('hoursChart').innerHTML=measures.map((v,i)=>`<div class="hourItem" title="${i}:00 - ${v} interacciones"><div class="hourColumn" style="height:${v?Math.max(3,100*v/peak):1}%"></div><small>${i}</small></div>`).join('');
+  el('hoursChart').innerHTML=measures.map((v,i)=>i<8||i>17?'':`<div class="hourItem" title="${i}:00 - ${v} interacciones"><div class="hourColumn" style="height:${v?Math.max(3,100*v/peak):1}%"></div><small>${i}</small></div>`).join('');
  }
  async function refreshAnalytics(){
   try{
@@ -234,11 +297,31 @@
   all.push(...arr(batch));if(batch.length<500)break;if(all.length>300000)throw Error('Demasiados registros para exportar en navegador');
  }return all}
  let participantsFull=[];
+ function cleanDoc(r){return String(r.documento||r.numero_documento||r.numeroDocumento||'').trim()}
+ function groupedPeople(basePeople){
+  const m=new Map();
+  const touch=doc=>{if(!m.has(doc))m.set(doc,{documento:doc,perfil:'',dependencia:'',libros:0,evaluaciones:0,interacciones:0,stands:new Set(),perfiles:new Set(),dependencias:new Set()});return m.get(doc)};
+  for(const r of basePeople){const doc=cleanDoc(r);if(!doc)continue;const g=touch(doc);g.perfil=r.perfil||'';g.dependencia=r.dependencia||'';g.libros=Number(r.libros||r.votos_libros||0);g.evaluaciones=Number(r.evaluaciones||r.evaluaciones_digitales||0);g.interacciones=Number(r.interacciones||g.libros+g.evaluaciones);
+   if(g.perfil)g.perfiles.add(g.perfil);if(g.dependencia)g.dependencias.add(g.dependencia)}
+  const feed=(rows,kind)=>{for(const r of rows){if(kind==='forms'&&r.excluida)continue;const doc=cleanDoc(r);if(!doc||!m.has(doc))continue;const g=m.get(doc);
+   const provider=String(r.proveedor||r.stand||'').trim();if(provider)g.stands.add(cleanStand(provider).replace(/^editorial /,''));
+   if(r.perfil)g.perfiles.add(r.perfil);if(r.dependencia)g.dependencias.add(r.dependencia)
+  }};
+  feed(voteCache,'votos');feed(formsCache,'forms');
+  return [...m.values()].map(g=>({documento:g.documento,perfil:g.perfil,dependencia:g.dependencia,stands_distintos:g.stands.size||'Sin desglose',
+    lista_stands:[...g.stands].join(' | '),libros:g.libros,evaluaciones:g.evaluaciones,interacciones:g.interacciones,
+    perfiles_observados:[...g.perfiles].join(' | '),dependencias_observadas:[...g.dependencias].join(' | '),
+    revision:g.perfiles.size>1||g.dependencias.size>1?'Revisar perfil/dependencia':'Sin discrepancia observada'}))
+    .sort((a,b)=>b.interacciones-a.interacciones||Number(b.stands_distintos||0)-Number(a.stands_distintos||0));
+ }
  async function loadPeople(){
-  try{participantsFull=await getPagedRpc('panel_feria_asistentes');
+  try{
+   const raw=await getPagedRpc('panel_feria_asistentes');participantsFull=groupedPeople(raw);
    el('kUnique').textContent=n(participantsFull.length);
-   table('peopleRows',participantsFull.slice(0,100),[r=>r.documento,r=>r.perfil,r=>r.dependencia,r=>r.libros,r=>r.evaluaciones,r=>r.interacciones]);
-   el('peopleStatus').textContent=`${participantsFull.length} participantes únicos identificados. Se muestran hasta 100; CSV incluye todos.`;
+   table('peopleRows',participantsFull.slice(0,100),[r=>r.documento,r=>r.perfil,r=>r.dependencia,r=>r.stands_distintos,r=>r.interacciones,r=>r.libros,r=>r.revision]);
+   if(dashboardData){dashboardData.participantes=participantsFull;table('participants',participantsFull.slice(0,100),[r=>r.documento,r=>r.perfil,r=>r.dependencia,r=>r.stands_distintos,r=>r.interacciones,r=>r.libros]);}
+   const flagged=participantsFull.filter(r=>r.revision.startsWith('Revisar')).length;
+   el('peopleStatus').textContent=`${participantsFull.length} documentos únicos identificados. ${flagged} discrepancias observables entre registros detallados disponibles. La suma de stands depende de que los RPC devuelvan el documento y stand por registro. Excel contiene todos los resultados.`;
   }catch(e){el('peopleStatus').textContent='Error: '+e.message}
  }
  el('downloadPeople').addEventListener('click',()=>{try{csvFull('feria_asistentes_unicos.csv',participantsFull)}catch(e){alert(e.message)}});

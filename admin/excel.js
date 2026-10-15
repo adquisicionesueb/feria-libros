@@ -1,0 +1,21 @@
+'use strict';
+/* Exportador XLSX sin bibliotecas externas; ZIP sin compresión, apto para datos privados. */
+window.FeriaExcel=(()=>{
+ const enc=new TextEncoder();
+ const x=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g,'');
+ const col=i=>{let a='';for(i++;i;i=Math.floor((i-1)/26))a=String.fromCharCode(65+(i-1)%26)+a;return a};
+ const crcTable=Array.from({length:256},(_,i)=>{let c=i;for(let j=0;j<8;j++)c=(c&1)?0xEDB88320^(c>>>1):c>>>1;return c>>>0});
+ function crc32(u){let c=0xffffffff;for(let i=0;i<u.length;i++)c=crcTable[(c^u[i])&255]^(c>>>8);return (c^0xffffffff)>>>0}
+ const u16=(v)=>[v&255,v>>>8&255],u32=v=>[v&255,v>>>8&255,v>>>16&255,v>>>24&255];
+ function zip(entries){let chunks=[],directory=[],pos=0;for(const [name,content] of entries){const n=enc.encode(name),b=enc.encode(content),crc=crc32(b);
+ const local=new Uint8Array([...u32(0x04034b50),...u16(20),0,0,0,0,0,0,0,0,...u32(crc),...u32(b.length),...u32(b.length),...u16(n.length),0,0,...n]);chunks.push(local,b);directory.push(new Uint8Array([...u32(0x02014b50),...u16(20),...u16(20),0,0,0,0,0,0,0,0,...u32(crc),...u32(b.length),...u32(b.length),...u16(n.length),0,0,0,0,0,0,0,0,0,0,...u32(pos),...n]));pos+=local.length+b.length}
+ const dlen=directory.reduce((s,a)=>s+a.length,0);const end=new Uint8Array([...u32(0x06054b50),0,0,0,0,...u16(entries.length),...u16(entries.length),...u32(dlen),...u32(pos),0,0]);return new Blob([...chunks,...directory,end],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})}
+ function save(filename,rows){if(!Array.isArray(rows)||!rows.length)throw Error('No hay datos para exportar');const keys=[...new Set(rows.flatMap(r=>Object.keys(r)))];if(keys.length>16384)throw Error('Demasiadas columnas');
+ const data=[keys,...rows.map(r=>keys.map(k=>r[k]))];if(data.length>1048576)throw Error('Límite de Excel superado');
+ let sheet='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetData>';
+ for(let i=0;i<data.length;i++){sheet+=`<row r="${i+1}">`;for(let j=0;j<data[i].length;j++){const val=data[i][j];if(val===null||val===undefined)continue;const ref=col(j)+(i+1);if(typeof val==='number'&&Number.isFinite(val))sheet+=`<c r="${ref}"><v>${val}</v></c>`;else sheet+=`<c r="${ref}" t="inlineStr"><is><t>${x(val)}</t></is></c>`}sheet+='</row>'}sheet+='</sheetData><autoFilter ref="A1:'+col(keys.length-1)+data.length+'"/></worksheet>';
+ const files=[['[Content_Types].xml','<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'],['_rels/.rels','<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'],['xl/workbook.xml','<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Resultados" sheetId="1" r:id="rId1"/></sheets></workbook>'],['xl/_rels/workbook.xml.rels','<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>'],['xl/worksheets/sheet1.xml',sheet]];
+ const blob=zip(files),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),5000)
+ }
+ return {save};
+})();
